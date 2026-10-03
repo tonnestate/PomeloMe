@@ -1,0 +1,45 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "pomelome"
+version = "0.1.0"
+description = "Decision-sparse execution runtime for governed, durable agentic work"
+readme = "README.md"
+requires-python = ">=3.11"
+license = {text = "Apache-2.0"}
+authors = [{name = "PomeloMe contributors"}]
+dependencies = [
+  "pydantic>=2.10,<3",
+]
+
+[project.optional-dependencies]
+durable = ["dbos>=3.0,<4"]
+sandbox = ["openshell>=0.1,<1"]
+otel = [
+  "opentelemetry-api>=1.42",
+  "opentelemetry-sdk>=1.42",
+]
+dev = [
+  "pytest>=8.3",
+  "pytest-cov>=6",
+  "ruff>=0.13",
+  "mypy>=1.15",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/pomelome"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+packages = ["pomelome"]

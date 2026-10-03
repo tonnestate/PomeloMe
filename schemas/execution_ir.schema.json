@@ -1,0 +1,761 @@
+{
+  "$defs": {
+    "AssertNode": {
+      "additionalProperties": false,
+      "properties": {
+        "condition": {
+          "$ref": "#/$defs/Condition"
+        },
+        "id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "message": {
+          "default": "assertion failed",
+          "title": "Message",
+          "type": "string"
+        },
+        "on_fail": {
+          "default": "SUSPEND",
+          "enum": [
+            "SUSPEND",
+            "FAIL"
+          ],
+          "title": "On Fail",
+          "type": "string"
+        },
+        "op": {
+          "const": "ASSERT",
+          "default": "ASSERT",
+          "title": "Op",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "condition"
+      ],
+      "title": "AssertNode",
+      "type": "object"
+    },
+    "Condition": {
+      "additionalProperties": false,
+      "properties": {
+        "left_ref": {
+          "title": "Left Ref",
+          "type": "string"
+        },
+        "operator": {
+          "enum": [
+            "eq",
+            "ne",
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "truthy",
+            "falsy"
+          ],
+          "title": "Operator",
+          "type": "string"
+        },
+        "right": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "integer"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "boolean"
+            },
+            {
+              "items": {},
+              "type": "array"
+            },
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "$ref": "#/$defs/Ref"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Right"
+        }
+      },
+      "required": [
+        "left_ref",
+        "operator"
+      ],
+      "title": "Condition",
+      "type": "object"
+    },
+    "EffectClass": {
+      "enum": [
+        "READ",
+        "IDEMPOTENT_WRITE",
+        "COMPENSATABLE",
+        "IRREVERSIBLE"
+      ],
+      "title": "EffectClass",
+      "type": "string"
+    },
+    "EffectNode": {
+      "additionalProperties": false,
+      "properties": {
+        "args": {
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "boolean"
+              },
+              {
+                "items": {},
+                "type": "array"
+              },
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "$ref": "#/$defs/Ref"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "title": "Args",
+          "type": "object"
+        },
+        "effect_class": {
+          "$ref": "#/$defs/EffectClass"
+        },
+        "id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "idempotency_key": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "$ref": "#/$defs/Ref"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Idempotency Key"
+        },
+        "op": {
+          "const": "EFFECT",
+          "default": "EFFECT",
+          "title": "Op",
+          "type": "string"
+        },
+        "output": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Output"
+        },
+        "required_capabilities": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Required Capabilities",
+          "type": "array",
+          "uniqueItems": true
+        },
+        "tool": {
+          "title": "Tool",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "tool",
+        "effect_class"
+      ],
+      "title": "EffectNode",
+      "type": "object"
+    },
+    "FilterNode": {
+      "additionalProperties": false,
+      "properties": {
+        "conditions": {
+          "items": {
+            "$ref": "#/$defs/Condition"
+          },
+          "minItems": 1,
+          "title": "Conditions",
+          "type": "array"
+        },
+        "id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "input_ref": {
+          "title": "Input Ref",
+          "type": "string"
+        },
+        "max_items": {
+          "default": 1000,
+          "maximum": 100000,
+          "minimum": 1,
+          "title": "Max Items",
+          "type": "integer"
+        },
+        "op": {
+          "const": "FILTER",
+          "default": "FILTER",
+          "title": "Op",
+          "type": "string"
+        },
+        "output": {
+          "title": "Output",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "input_ref",
+        "conditions",
+        "output"
+      ],
+      "title": "FilterNode",
+      "type": "object"
+    },
+    "IfTypedNode": {
+      "additionalProperties": false,
+      "properties": {
+        "condition": {
+          "$ref": "#/$defs/Condition"
+        },
+        "else_nodes": {
+          "items": {
+            "discriminator": {
+              "mapping": {
+                "ASSERT": "#/$defs/AssertNode",
+                "EFFECT": "#/$defs/EffectNode",
+                "FILTER": "#/$defs/FilterNode",
+                "IF_TYPED": "#/$defs/IfTypedNode",
+                "PARALLEL_BOUNDED": "#/$defs/ParallelBoundedNode",
+                "READ": "#/$defs/ReadNode",
+                "REQUEST_JUDGMENT": "#/$defs/RequestJudgmentNode",
+                "RETURN": "#/$defs/ReturnNode",
+                "SELECT": "#/$defs/SelectNode"
+              },
+              "propertyName": "op"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/$defs/ReadNode"
+              },
+              {
+                "$ref": "#/$defs/EffectNode"
+              },
+              {
+                "$ref": "#/$defs/SelectNode"
+              },
+              {
+                "$ref": "#/$defs/FilterNode"
+              },
+              {
+                "$ref": "#/$defs/AssertNode"
+              },
+              {
+                "$ref": "#/$defs/RequestJudgmentNode"
+              },
+              {
+                "$ref": "#/$defs/ReturnNode"
+              },
+              {
+                "$ref": "#/$defs/IfTypedNode"
+              },
+              {
+                "$ref": "#/$defs/ParallelBoundedNode"
+              }
+            ]
+          },
+          "title": "Else Nodes",
+          "type": "array"
+        },
+        "id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "op": {
+          "const": "IF_TYPED",
+          "default": "IF_TYPED",
+          "title": "Op",
+          "type": "string"
+        },
+        "then_nodes": {
+          "items": {
+            "discriminator": {
+              "mapping": {
+                "ASSERT": "#/$defs/AssertNode",
+                "EFFECT": "#/$defs/EffectNode",
+                "FILTER": "#/$defs/FilterNode",
+                "IF_TYPED": "#/$defs/IfTypedNode",
+                "PARALLEL_BOUNDED": "#/$defs/ParallelBoundedNode",
+                "READ": "#/$defs/ReadNode",
+                "REQUEST_JUDGMENT": "#/$defs/RequestJudgmentNode",
+                "RETURN": "#/$defs/ReturnNode",
+                "SELECT": "#/$defs/SelectNode"
+              },
+              "propertyName": "op"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/$defs/ReadNode"
+              },
+              {
+                "$ref": "#/$defs/EffectNode"
+              },
+              {
+                "$ref": "#/$defs/SelectNode"
+              },
+              {
+                "$ref": "#/$defs/FilterNode"
+              },
+              {
+                "$ref": "#/$defs/AssertNode"
+              },
+              {
+                "$ref": "#/$defs/RequestJudgmentNode"
+              },
+              {
+                "$ref": "#/$defs/ReturnNode"
+              },
+              {
+                "$ref": "#/$defs/IfTypedNode"
+              },
+              {
+                "$ref": "#/$defs/ParallelBoundedNode"
+              }
+            ]
+          },
+          "title": "Then Nodes",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "condition"
+      ],
+      "title": "IfTypedNode",
+      "type": "object"
+    },
+    "ParallelBoundedNode": {
+      "additionalProperties": false,
+      "properties": {
+        "branches": {
+          "items": {
+            "items": {
+              "discriminator": {
+                "mapping": {
+                  "ASSERT": "#/$defs/AssertNode",
+                  "EFFECT": "#/$defs/EffectNode",
+                  "FILTER": "#/$defs/FilterNode",
+                  "IF_TYPED": "#/$defs/IfTypedNode",
+                  "PARALLEL_BOUNDED": "#/$defs/ParallelBoundedNode",
+                  "READ": "#/$defs/ReadNode",
+                  "REQUEST_JUDGMENT": "#/$defs/RequestJudgmentNode",
+                  "RETURN": "#/$defs/ReturnNode",
+                  "SELECT": "#/$defs/SelectNode"
+                },
+                "propertyName": "op"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/ReadNode"
+                },
+                {
+                  "$ref": "#/$defs/EffectNode"
+                },
+                {
+                  "$ref": "#/$defs/SelectNode"
+                },
+                {
+                  "$ref": "#/$defs/FilterNode"
+                },
+                {
+                  "$ref": "#/$defs/AssertNode"
+                },
+                {
+                  "$ref": "#/$defs/RequestJudgmentNode"
+                },
+                {
+                  "$ref": "#/$defs/ReturnNode"
+                },
+                {
+                  "$ref": "#/$defs/IfTypedNode"
+                },
+                {
+                  "$ref": "#/$defs/ParallelBoundedNode"
+                }
+              ]
+            },
+            "type": "array"
+          },
+          "minItems": 1,
+          "title": "Branches",
+          "type": "array"
+        },
+        "id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "max_children": {
+          "maximum": 32,
+          "minimum": 1,
+          "title": "Max Children",
+          "type": "integer"
+        },
+        "op": {
+          "const": "PARALLEL_BOUNDED",
+          "default": "PARALLEL_BOUNDED",
+          "title": "Op",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "branches",
+        "max_children"
+      ],
+      "title": "ParallelBoundedNode",
+      "type": "object"
+    },
+    "ReadNode": {
+      "additionalProperties": false,
+      "properties": {
+        "args": {
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "boolean"
+              },
+              {
+                "items": {},
+                "type": "array"
+              },
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "$ref": "#/$defs/Ref"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "title": "Args",
+          "type": "object"
+        },
+        "id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "op": {
+          "const": "READ",
+          "default": "READ",
+          "title": "Op",
+          "type": "string"
+        },
+        "output": {
+          "title": "Output",
+          "type": "string"
+        },
+        "required_capabilities": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Required Capabilities",
+          "type": "array",
+          "uniqueItems": true
+        },
+        "tool": {
+          "title": "Tool",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "tool",
+        "output"
+      ],
+      "title": "ReadNode",
+      "type": "object"
+    },
+    "Ref": {
+      "additionalProperties": false,
+      "properties": {
+        "ref": {
+          "title": "Ref",
+          "type": "string"
+        }
+      },
+      "required": [
+        "ref"
+      ],
+      "title": "Ref",
+      "type": "object"
+    },
+    "RequestJudgmentNode": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "input_refs": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Input Refs",
+          "type": "array"
+        },
+        "max_output_tokens": {
+          "default": 512,
+          "maximum": 16384,
+          "minimum": 1,
+          "title": "Max Output Tokens",
+          "type": "integer"
+        },
+        "model_tier": {
+          "default": "SMALL",
+          "enum": [
+            "SMALL",
+            "STRONG"
+          ],
+          "title": "Model Tier",
+          "type": "string"
+        },
+        "op": {
+          "const": "REQUEST_JUDGMENT",
+          "default": "REQUEST_JUDGMENT",
+          "title": "Op",
+          "type": "string"
+        },
+        "output": {
+          "title": "Output",
+          "type": "string"
+        },
+        "purpose": {
+          "maxLength": 512,
+          "minLength": 1,
+          "title": "Purpose",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "purpose",
+        "output"
+      ],
+      "title": "RequestJudgmentNode",
+      "type": "object"
+    },
+    "ReturnNode": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "op": {
+          "const": "RETURN",
+          "default": "RETURN",
+          "title": "Op",
+          "type": "string"
+        },
+        "refs": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Refs",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "title": "ReturnNode",
+      "type": "object"
+    },
+    "SelectNode": {
+      "additionalProperties": false,
+      "properties": {
+        "fields": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Fields",
+          "type": "array"
+        },
+        "id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "input_ref": {
+          "title": "Input Ref",
+          "type": "string"
+        },
+        "op": {
+          "const": "SELECT",
+          "default": "SELECT",
+          "title": "Op",
+          "type": "string"
+        },
+        "output": {
+          "title": "Output",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "input_ref",
+        "fields",
+        "output"
+      ],
+      "title": "SelectNode",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "metadata": {
+      "additionalProperties": true,
+      "title": "Metadata",
+      "type": "object"
+    },
+    "nodes": {
+      "items": {
+        "discriminator": {
+          "mapping": {
+            "ASSERT": "#/$defs/AssertNode",
+            "EFFECT": "#/$defs/EffectNode",
+            "FILTER": "#/$defs/FilterNode",
+            "IF_TYPED": "#/$defs/IfTypedNode",
+            "PARALLEL_BOUNDED": "#/$defs/ParallelBoundedNode",
+            "READ": "#/$defs/ReadNode",
+            "REQUEST_JUDGMENT": "#/$defs/RequestJudgmentNode",
+            "RETURN": "#/$defs/ReturnNode",
+            "SELECT": "#/$defs/SelectNode"
+          },
+          "propertyName": "op"
+        },
+        "oneOf": [
+          {
+            "$ref": "#/$defs/ReadNode"
+          },
+          {
+            "$ref": "#/$defs/EffectNode"
+          },
+          {
+            "$ref": "#/$defs/SelectNode"
+          },
+          {
+            "$ref": "#/$defs/FilterNode"
+          },
+          {
+            "$ref": "#/$defs/AssertNode"
+          },
+          {
+            "$ref": "#/$defs/RequestJudgmentNode"
+          },
+          {
+            "$ref": "#/$defs/ReturnNode"
+          },
+          {
+            "$ref": "#/$defs/IfTypedNode"
+          },
+          {
+            "$ref": "#/$defs/ParallelBoundedNode"
+          }
+        ]
+      },
+      "minItems": 1,
+      "title": "Nodes",
+      "type": "array"
+    },
+    "plan_id": {
+      "maxLength": 128,
+      "minLength": 1,
+      "title": "Plan Id",
+      "type": "string"
+    },
+    "schema_version": {
+      "const": "0.1",
+      "default": "0.1",
+      "title": "Schema Version",
+      "type": "string"
+    }
+  },
+  "required": [
+    "plan_id",
+    "nodes"
+  ],
+  "title": "ExecutionPlan",
+  "type": "object"
+}
