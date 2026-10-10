@@ -24,6 +24,8 @@ def _check_payload(value: Any, *, depth: int = 0) -> None:
     if depth > 32:
         raise AuthorizationError("ZERO_COST_DENIED: payload nesting limit")
     if isinstance(value, dict):
+        if set(value) == {"ref"}:
+            raise AuthorizationError("ZERO_COST_DENIED: ambiguous unresolved ref")
         for key, inner in value.items():
             if not isinstance(key, str):
                 raise AuthorizationError("ZERO_COST_DENIED: invalid payload key")
@@ -63,7 +65,7 @@ class ZeroCostGuard:
 
     def __post_init__(self) -> None:
         for name in self.local_read_tools | self.local_effect_tools:
-            if not isinstance(name, str) or not name or "://" in name:
+            if not isinstance(name, str) or not name.startswith("local.") or "://" in name:
                 raise ValueError("invalid zero-cost local tool declaration")
 
     def require_budget(self, budget: Any) -> None:
