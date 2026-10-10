@@ -10,6 +10,7 @@ from .fsm import EffectState
 from .models import AuthorityEnvelope, EffectClass, ReceiptKind
 from .policy import DefaultPolicyKernel
 from .store import SqliteEffectStore
+from .zero_cost import ZeroCostGuard, require_mandatory_guard
 
 
 class EffectIntent(BaseModel):
@@ -48,10 +49,12 @@ class EffectGateway:
         store: SqliteEffectStore,
         adapters: dict[str, EffectAdapter],
         policy: DefaultPolicyKernel | None = None,
+        zero_cost: ZeroCostGuard | None = None,
     ) -> None:
         self.store = store
         self.adapters = adapters
         self.policy = policy or DefaultPolicyKernel()
+        self.zero_cost = zero_cost
 
     def execute(
         self,
@@ -60,6 +63,10 @@ class EffectGateway:
         *,
         crash_after_dispatch: bool = False,
     ) -> EffectResult:
+        require_mandatory_guard(authority, self.zero_cost)
+        # Check cost authority before persistent write, probe, recovery or dispatch.
+        if self.zero_cost is not None:
+            self.zero_cost.require_operation("EFFECT", intent.tool, intent.args)
         self.store.put_intent(
             intent.run_id,
             intent.effect_id,

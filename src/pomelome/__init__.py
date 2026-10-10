@@ -8,6 +8,7 @@ from .ir import ExecutionPlan
 from .models import AuthorityEnvelope, EffectClass
 from .policy import DefaultPolicyKernel
 from .runtime import PomeloRuntime, RunResult
+from .zero_cost import ZeroCostGuard
 
 __all__ = [
     "AdmissionReport",
@@ -25,6 +26,7 @@ __all__ = [
     "PomeloRuntime",
     "RunResult",
     "RunState",
+    "ZeroCostGuard",
 ]
 
 __version__ = "0.1.0"
