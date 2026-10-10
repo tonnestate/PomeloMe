@@ -14,6 +14,8 @@ from .ir import (
 )
 from .models import AuthorityEnvelope
 from .policy import DefaultPolicyKernel
+from .zero_cost import ZeroCostGuard
+from .errors import AuthorizationError
 
 
 @dataclass(frozen=True)
@@ -52,8 +54,11 @@ def _walk(nodes: list[Node]) -> list[Node]:
 
 
 class PlanAdmitter:
-    def __init__(self, policy: DefaultPolicyKernel | None = None) -> None:
+    def __init__(
+        self, policy: DefaultPolicyKernel | None = None, zero_cost: ZeroCostGuard | None = None
+    ) -> None:
         self.policy = policy or DefaultPolicyKernel()
+        self.zero_cost = zero_cost
 
     def inspect(self, plan: ExecutionPlan) -> PlanStats:
         flat = _walk(plan.nodes)
@@ -77,6 +82,21 @@ class PlanAdmitter:
     ) -> AdmissionReport:
         reasons: list[str] = []
         flat = _walk(plan.nodes)
+        if self.zero_cost is not None:
+            try:
+                self.zero_cost.require_budget(budget)
+            except AuthorizationError as exc:
+                reasons.append(str(exc))
+            for node in flat:
+                try:
+                    if isinstance(node, ReadNode):
+                        self.zero_cost.require_operation("READ", node.tool, node.args)
+                    elif isinstance(node, EffectNode):
+                        self.zero_cost.require_operation("EFFECT", node.tool, node.args)
+                    elif isinstance(node, RequestJudgmentNode):
+                        self.zero_cost.require_no_model()
+                except AuthorizationError as exc:
+                    reasons.append(f"{node.id}: {exc}")
         ids = [node.id for node in flat]
         if len(ids) != len(set(ids)):
             reasons.append("node ids must be globally unique")
