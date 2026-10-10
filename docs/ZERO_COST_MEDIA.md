@@ -72,3 +72,12 @@ execute when both cost and existing capability policies allow them.
 These checks do NOT prove a real free cloud GPU or video provider is available,
 that PlumMe is connected, or that AVCOS production is protected. That requires
 independent host-side audit and integration by the authorized runtime owner.
+
+## Host authority requirement
+
+The trusted AuthorityProvider must mint an AuthorityEnvelope containing the
+constraint zero_cost_required = true for every AVCOS media job. This flag is
+not supplied by the agent or plan. PlanAdmitter and EffectGateway reject the
+job if it is mandatory but no ZeroCostGuard is installed. Malformed flag values
+also fail closed. The production host must still prevent issuing unmarked
+media authorities and enforce process-level billing/egress isolation.

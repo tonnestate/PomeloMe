@@ -14,7 +14,7 @@ from .ir import (
 )
 from .models import AuthorityEnvelope
 from .policy import DefaultPolicyKernel
-from .zero_cost import ZeroCostGuard
+from .zero_cost import ZeroCostGuard, require_mandatory_guard
 from .errors import AuthorizationError
 
 
@@ -82,6 +82,10 @@ class PlanAdmitter:
     ) -> AdmissionReport:
         reasons: list[str] = []
         flat = _walk(plan.nodes)
+        try:
+            require_mandatory_guard(authority, self.zero_cost)
+        except AuthorizationError as exc:
+            reasons.append(str(exc))
         if self.zero_cost is not None:
             try:
                 self.zero_cost.require_budget(budget)

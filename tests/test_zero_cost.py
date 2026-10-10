@@ -251,3 +251,36 @@ def test_local_effect_still_executes(tmp_path, guard, authority):
                  authority, BudgetEnvelope(max_cost_usd=0))
     assert adapter.calls == 1
     assert out.model_calls == 0
+
+def test_host_mandate_denies_unwired_plan(guard, authority):
+    authority.constraints["zero_cost_required"] = True
+    p = plan(effect("local.media.render"))
+    report = PlanAdmitter().admit(p, authority, BudgetEnvelope(max_cost_usd=0))
+    assert not report.admitted
+    assert any("required guard not installed" in r for r in report.reasons)
+
+
+def test_host_mandate_denies_unwired_direct_gateway(tmp_path, authority):
+    authority.constraints["zero_cost_required"] = True
+    adapter = CountingAdapter()
+    eg = EffectGateway(
+        SqliteEffectStore(tmp_path / "unguarded.sqlite"),
+        {"local.media.render": adapter},
+    )
+    intent = EffectIntent(
+        run_id="r", effect_id="e", tool="local.media.render",
+        effect_class=EffectClass.IDEMPOTENT_WRITE,
+    )
+    with pytest.raises(AuthorizationError, match="required guard not installed"):
+        eg.execute(intent, authority)
+    assert adapter.calls == 0
+    assert eg.store.get_effect("e") is None
+
+
+def test_malformed_mandatory_constraint_denied(guard, authority):
+    authority.constraints["zero_cost_required"] = "false"
+    report = PlanAdmitter(zero_cost=guard).admit(
+        plan(effect("local.media.render")), authority, BudgetEnvelope(max_cost_usd=0)
+    )
+    assert not report.admitted
+    assert any("malformed authority constraint" in r for r in report.reasons)

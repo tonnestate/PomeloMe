@@ -84,3 +84,14 @@ class ZeroCostGuard:
 
     def require_no_model(self) -> None:
         raise AuthorizationError("ZERO_COST_DENIED: unverified model route")
+
+def require_mandatory_guard(authority: Any, guard: ZeroCostGuard | None) -> None:
+    """Fail closed when host-minted authority mandates zero-cost execution."""
+    constraints = authority.constraints
+    if "zero_cost_required" not in constraints:
+        return
+    flag = constraints["zero_cost_required"]
+    if type(flag) is not bool:
+        raise AuthorizationError("ZERO_COST_DENIED: malformed authority constraint")
+    if flag and guard is None:
+        raise AuthorizationError("ZERO_COST_DENIED: required guard not installed")

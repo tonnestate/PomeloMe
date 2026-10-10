@@ -10,7 +10,7 @@ from .fsm import EffectState
 from .models import AuthorityEnvelope, EffectClass, ReceiptKind
 from .policy import DefaultPolicyKernel
 from .store import SqliteEffectStore
-from .zero_cost import ZeroCostGuard
+from .zero_cost import ZeroCostGuard, require_mandatory_guard
 
 
 class EffectIntent(BaseModel):
@@ -63,6 +63,7 @@ class EffectGateway:
         *,
         crash_after_dispatch: bool = False,
     ) -> EffectResult:
+        require_mandatory_guard(authority, self.zero_cost)
         # Check cost authority before persistent write, probe, recovery or dispatch.
         if self.zero_cost is not None:
             self.zero_cost.require_operation("EFFECT", intent.tool, intent.args)
