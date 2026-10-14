@@ -72,3 +72,48 @@ def test_effect_identity_collision_fails_closed(tmp_path: Path) -> None:
     second = first.model_copy(update={"args": {"amount": 200}})
     with pytest.raises(ValueError, match="effect identity collision"):
         store.put_intent("run-1", "same-id", "wire_money", "IRREVERSIBLE", second.model_dump(mode="json"))
+
+
+def test_concurrent_duplicate_irreversible_effect_is_dispatched_once(tmp_path: Path) -> None:
+    """Both callers read INTENDED before either claims the effect."""
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier, Lock
+    from pomelome.policy import DefaultPolicyKernel
+
+    entered = Barrier(2, timeout=10)
+
+    class ConcurrentPolicy(DefaultPolicyKernel):
+        def require_effect(self, authority, tool, effect_class, required):
+            super().require_effect(authority, tool, effect_class, required)
+            entered.wait()
+
+    class CountedExternal(IrreversibleExternalSystem):
+        def __init__(self):
+            super().__init__()
+            self.lock = Lock()
+
+        def dispatch(self, intent):
+            with self.lock:
+                return super().dispatch(intent)
+
+    store = SqliteEffectStore(tmp_path / "concurrent.sqlite")
+    external = CountedExternal()
+    gateway = EffectGateway(store, {"wire_money": external}, policy=ConcurrentPolicy())
+    auth = AuthorityEnvelope(
+        authority_id="auth", principal="tester",
+        capabilities=frozenset({"tool:wire_money", "effect:irreversible"}),
+    )
+    intent = EffectIntent(
+        run_id="run", effect_id="one-effect", tool="wire_money",
+        effect_class=EffectClass.IRREVERSIBLE, args={"amount": 100},
+    )
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        a = pool.submit(gateway.execute, intent, auth)
+        b = pool.submit(gateway.execute, intent, auth)
+        results = (a.result(timeout=12), b.result(timeout=12))
+
+    assert sum(r.dispatched for r in results) == 1
+    assert external.dispatches == 1
+    assert store.get_effect("one-effect")["dispatch_count"] == 1
+    assert store.count_receipts() == 1
