@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable, Protocol
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_serializer
 
 from .errors import SimulatedCrash
 from .fsm import EffectState
@@ -20,6 +20,11 @@ class EffectIntent(BaseModel):
     args: dict[str, Any] = Field(default_factory=dict)
     required_capabilities: frozenset[str] = Field(default_factory=frozenset)
     idempotency_key: str | None = None
+
+    @field_serializer("required_capabilities")
+    def _canonical_capabilities(self, value: frozenset[str]) -> list[str]:
+        """Durable identity must not depend on PYTHONHASHSEED."""
+        return sorted(value)
 
 
 class EffectObservation(BaseModel):
@@ -115,7 +120,7 @@ class EffectGateway:
         The persisted intent identity must match exactly, including arguments.
         """
         entry = self.store.get_effect(intent.effect_id)
-        if entry is None or entry["intent"] != intent.model_dump(mode="json"):
+        if entry is None or self.store.canonical_intent(entry["intent"]) != self.store.canonical_intent(intent.model_dump(mode="json")):
             raise ValueError("EFFECT_NOT_FOUND_OR_IDENTITY_MISMATCH")
         state = EffectState(entry["state"])
         if state in (EffectState.INTENDED, EffectState.AUTHORIZED):
