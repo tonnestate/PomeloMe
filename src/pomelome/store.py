@@ -98,6 +98,34 @@ class SqliteEffectStore:
             ):
                 raise ValueError(f"effect identity collision for {effect_id}")
 
+    def claim_dispatch(self, effect_id: str) -> bool:
+        """Atomically claim the one permitted external dispatch for this effect.
+
+        Authorization has already been checked by EffectGateway against the
+        current AuthorityEnvelope. INTENDED -> AUTHORIZED -> DISPATCHED occurs
+        inside a single write transaction. A competing process may observe
+        DISPATCHED, but can never claim another dispatch.
+        """
+        with self.transaction() as con:
+            row = con.execute(
+                "SELECT state FROM effects WHERE effect_id = ?", (effect_id,)
+            ).fetchone()
+            if row is None or row["state"] not in (
+                EffectState.INTENDED, EffectState.AUTHORIZED
+            ):
+                return False
+            if row["state"] == EffectState.INTENDED:
+                con.execute(
+                    "UPDATE effects SET state=? WHERE effect_id=? AND state=?",
+                    (EffectState.AUTHORIZED, effect_id, EffectState.INTENDED),
+                )
+            changed = con.execute(
+                "UPDATE effects SET state=?, dispatch_count=dispatch_count+1 "
+                "WHERE effect_id=? AND state=?",
+                (EffectState.DISPATCHED, effect_id, EffectState.AUTHORIZED),
+            )
+            return changed.rowcount == 1
+
     def set_state(self, effect_id: str, state: EffectState, *, increment_dispatch: bool = False) -> None:
         with self.transaction() as con:
             if increment_dispatch:
