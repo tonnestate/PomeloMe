@@ -89,9 +89,16 @@ class EffectGateway:
         self.policy.require_effect(
             authority, intent.tool, intent.effect_class, intent.required_capabilities
         )
-        self.store.set_state(intent.effect_id, EffectState.AUTHORIZED)
-        # Persist DISPATCHED before crossing the external boundary.
-        self.store.set_state(intent.effect_id, EffectState.DISPATCHED, increment_dispatch=True)
+        # A single durable transaction owns the transition to DISPATCHED.
+        # Otherwise two concurrent callers can both read INTENDED, both
+        # authorize and dispatch the same irreversible effect.
+        if not self.store.claim_dispatch(intent.effect_id):
+            current = self.store.get_effect(intent.effect_id)
+            assert current is not None
+            # A competing caller may still be dispatching. Never probe or
+            # redispatch from this failed claim; explicit later recovery uses
+            # the existing DISPATCHED -> PROBING path.
+            return EffectResult(EffectState(current["state"]), None, dispatched=False)
         observation = adapter.dispatch(intent)
         if crash_after_dispatch:
             raise SimulatedCrash("fault injection: process lost after dispatch before durable observation")
