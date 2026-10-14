@@ -75,6 +75,25 @@ class SqliteEffectStore:
         result["observation"] = json.loads(obs) if obs else None
         return result
 
+    def unresolved_for_run(self, run_id: str) -> tuple[str, ...]:
+        """Effects whose external outcome is not yet durably reconciled.
+
+        INTENDED/AUTHORIZED are excluded: no external dispatch has been
+        claimed. The caller must still reauthorize before a future dispatch.
+        """
+        pending = (
+            EffectState.DISPATCHED, EffectState.UNKNOWN, EffectState.PROBING,
+            EffectState.WAITING_APPROVAL, EffectState.KNOWN_SUCCESS,
+            EffectState.KNOWN_FAILURE,
+        )
+        with self._connect() as con:
+            rows = con.execute(
+                "SELECT effect_id FROM effects WHERE run_id=? AND state IN "
+                f"({','.join('?' for _ in pending)}) ORDER BY effect_id",
+                (run_id, *pending),
+            ).fetchall()
+        return tuple(row["effect_id"] for row in rows)
+
     def put_intent(self, run_id: str, effect_id: str, tool: str, effect_class: str, intent: dict[str, Any]) -> None:
         intent_json = json.dumps(intent, sort_keys=True)
         with self.transaction() as con:
