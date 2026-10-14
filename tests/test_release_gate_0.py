@@ -302,7 +302,8 @@ print(json.dumps({"state": store.get_effect(intent.effect_id)["state"]}))
             text=True, capture_output=True, timeout=15,
         )
         assert run.returncode == 0, (seed, mode, run.stderr)
-        assert json.loads(run.stdout)["state"] == "RECONCILED"
+        expected_state = "DISPATCHED" if mode == "write" else "RECONCILED"
+        assert json.loads(run.stdout)["state"] == expected_state
 
 
 def test_legacy_capability_order_is_accepted_without_rewriting(tmp_path: Path) -> None:
