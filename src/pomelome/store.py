@@ -94,6 +94,22 @@ class SqliteEffectStore:
             ).fetchall()
         return tuple(row["effect_id"] for row in rows)
 
+    @staticmethod
+    def canonical_intent(intent: dict[str, Any]) -> str:
+        """Compare durable intent identity independently of capability-set order.
+
+        Only the serialized capability set is order-insensitive. All other
+        fields retain exact semantic equality. Never modify persisted legacy
+        rows: their original evidence remains intact.
+        """
+        normalized = dict(intent)
+        capabilities = normalized.get("required_capabilities")
+        if isinstance(capabilities, (list, tuple, set, frozenset)):
+            if not all(isinstance(value, str) for value in capabilities):
+                raise ValueError("INVALID_PERSISTED_CAPABILITIES")
+            normalized["required_capabilities"] = sorted(capabilities)
+        return json.dumps(normalized, sort_keys=True, separators=(",", ":"))
+
     def put_intent(self, run_id: str, effect_id: str, tool: str, effect_class: str, intent: dict[str, Any]) -> None:
         intent_json = json.dumps(intent, sort_keys=True)
         with self.transaction() as con:
@@ -113,7 +129,7 @@ class SqliteEffectStore:
                 row["run_id"] != run_id
                 or row["tool"] != tool
                 or row["effect_class"] != effect_class
-                or row["intent_json"] != intent_json
+                or self.canonical_intent(json.loads(row["intent_json"])) != self.canonical_intent(intent)
             ):
                 raise ValueError(f"effect identity collision for {effect_id}")
 
