@@ -173,6 +173,59 @@ class SqliteEffectStore:
                 (receipt_id, json.dumps(receipt, sort_keys=True)),
             )
 
+    def resolve_waiting(self, effect_id: str, *, outcome: str,
+                        resolver: str, evidence_ref: str) -> dict[str, Any]:
+        """Atomically close an uncertain effect with host-attested evidence.
+
+        UNKNOWN_CLOSED is NOT success or failure. The semantic receipt retains
+        this uncertainty, and no external effect is redispatched.
+        """
+        if outcome not in ("CONFIRMED_SUCCESS", "CONFIRMED_FAILURE", "UNKNOWN_CLOSED"):
+            raise ValueError("INVALID_RESOLUTION_OUTCOME")
+        if not isinstance(resolver, str) or not resolver.strip():
+            raise ValueError("RESOLVER_REQUIRED")
+        if not isinstance(evidence_ref, str) or not evidence_ref.strip():
+            raise ValueError("RESOLUTION_EVIDENCE_REQUIRED")
+        with self.transaction() as con:
+            row = con.execute(
+                "SELECT run_id,tool,effect_class,state FROM effects WHERE effect_id=?",
+                (effect_id,),
+            ).fetchone()
+            if row is None:
+                raise ValueError("EFFECT_NOT_FOUND")
+            if row["state"] != EffectState.WAITING_APPROVAL:
+                raise ValueError("EFFECT_NOT_WAITING_APPROVAL")
+            success = (True if outcome == "CONFIRMED_SUCCESS"
+                       else False if outcome == "CONFIRMED_FAILURE" else None)
+            observation = {
+                "success": success, "data": None, "external_ref": None,
+                "message": "host_resolution:" + outcome,
+            }
+            receipt = {
+                "kind": "EFFECT_OBSERVATION", "run_id": row["run_id"],
+                "effect_id": effect_id, "tool": row["tool"],
+                "effect_class": row["effect_class"], "success": success,
+                "external_ref": None, "resolution_outcome": outcome,
+                "resolver": resolver.strip(), "evidence_ref": evidence_ref.strip(),
+            }
+            # A single transaction performs state transition and receipt write.
+            # The middle KNOWN_* semantic state is reflected by outcome; no
+            # other actor can observe or interleave within the transaction.
+            changed = con.execute(
+                "UPDATE effects SET state=?, observation_json=? "
+                "WHERE effect_id=? AND state=?",
+                (EffectState.RECONCILED, json.dumps(observation, sort_keys=True),
+                 effect_id, EffectState.WAITING_APPROVAL),
+            )
+            if changed.rowcount != 1:
+                raise ValueError("EFFECT_RESOLUTION_RACE")
+            receipt_id = f"effect:{effect_id}:observation"
+            con.execute(
+                "INSERT INTO outbox(receipt_id,payload_json) VALUES (?,?)",
+                (receipt_id, json.dumps(receipt, sort_keys=True)),
+            )
+            return observation
+
     def reconcile(self, effect_id: str) -> None:
         self.set_state(effect_id, EffectState.RECONCILED)
 
