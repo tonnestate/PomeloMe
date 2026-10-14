@@ -117,3 +117,116 @@ def test_concurrent_duplicate_irreversible_effect_is_dispatched_once(tmp_path: P
     assert external.dispatches == 1
     assert store.get_effect("one-effect")["dispatch_count"] == 1
     assert store.count_receipts() == 1
+
+
+def test_recovery_after_authority_revocation_is_observation_only(tmp_path: Path) -> None:
+    store = SqliteEffectStore(tmp_path / "revocation.sqlite")
+    external = IrreversibleExternalSystem()
+    gateway = EffectGateway(store, {"wire_money": external})
+    auth = AuthorityEnvelope(
+        authority_id="before", principal="trusted",
+        capabilities=frozenset({"tool:wire_money", "effect:irreversible"}),
+    )
+    intent = EffectIntent(
+        run_id="run", effect_id="revoked-after-crash",
+        tool="wire_money", effect_class=EffectClass.IRREVERSIBLE,
+    )
+    with pytest.raises(SimulatedCrash):
+        gateway.execute(intent, auth, crash_after_dispatch=True)
+    assert external.dispatches == 1
+
+    # Host no longer has dispatch capabilities; recover needs no auth at all.
+    result = gateway.recover(intent)
+    assert result.state is EffectState.RECONCILED
+    assert result.observation.success is True
+    assert not result.dispatched
+    assert external.dispatches == 1
+    assert store.unresolved_for_run("run") == ()
+    assert store.count_receipts() == 1
+
+
+@pytest.mark.parametrize("outcome,expected", [
+    ("CONFIRMED_SUCCESS", True),
+    ("CONFIRMED_FAILURE", False),
+    ("UNKNOWN_CLOSED", None),
+])
+def test_waiting_approval_host_resolution_releases_run_without_dispatch(
+    tmp_path: Path, outcome: str, expected: bool | None
+) -> None:
+    class InconclusiveExternal:
+        def __init__(self):
+            self.dispatches = 0
+        def dispatch(self, intent):
+            self.dispatches += 1
+            return EffectObservation(success=True, external_ref="external:" + intent.effect_id)
+        def probe(self, intent):
+            return None
+
+    store = SqliteEffectStore(tmp_path / "waiting.sqlite")
+    external = InconclusiveExternal()
+    approvals = []
+    def host_resolver(effect_id, decision, principal, evidence):
+        approvals.append((effect_id, decision, principal, evidence))
+        return principal == "owner" and evidence == "independent:case-42"
+    gateway = EffectGateway(
+        store, {"wire_money": external}, resolution_authorizer=host_resolver
+    )
+    auth = AuthorityEnvelope(
+        authority_id="before", principal="trusted",
+        capabilities=frozenset({"tool:wire_money", "effect:irreversible"}),
+    )
+    intent = EffectIntent(
+        run_id="run", effect_id="uncertain", tool="wire_money",
+        effect_class=EffectClass.IRREVERSIBLE,
+    )
+    with pytest.raises(SimulatedCrash):
+        gateway.execute(intent, auth, crash_after_dispatch=True)
+    pending = gateway.recover(intent)
+    assert pending.state is EffectState.WAITING_APPROVAL
+    assert store.unresolved_for_run("run") == ("uncertain",)
+    assert external.dispatches == 1
+
+    from pomelome.errors import AuthorizationError
+    with pytest.raises(AuthorizationError):
+        gateway.resolve_waiting("uncertain", outcome, resolver="agent",
+                                evidence_ref="independent:case-42")
+    assert store.unresolved_for_run("run") == ("uncertain",)
+    with pytest.raises(ValueError, match="RESOLUTION_EVIDENCE_REQUIRED"):
+        gateway.resolve_waiting("uncertain", outcome, resolver="owner", evidence_ref="")
+
+    result = gateway.resolve_waiting("uncertain", outcome, resolver="owner",
+                                     evidence_ref="independent:case-42")
+    assert result.state is EffectState.RECONCILED
+    assert result.observation.success is expected
+    assert not result.dispatched
+    assert external.dispatches == 1
+    assert store.unresolved_for_run("run") == ()
+    receipts = store.pending_receipts()
+    assert len(receipts) == 1
+    assert receipts[0]["resolver"] == "owner"
+    assert receipts[0]["evidence_ref"] == "independent:case-42"
+    assert receipts[0]["resolution_outcome"] == outcome
+    assert receipts[0]["success"] is expected
+    with pytest.raises(ValueError, match="EFFECT_NOT_WAITING_APPROVAL"):
+        gateway.resolve_waiting("uncertain", outcome, resolver="owner",
+                                evidence_ref="independent:case-42")
+    # No stuck run: a new effect can execute with a newly authorized intent.
+    next_intent = EffectIntent(
+        run_id="run", effect_id="next", tool="wire_money",
+        effect_class=EffectClass.IRREVERSIBLE,
+    )
+    gateway.execute(next_intent, auth)
+    assert external.dispatches == 2
+
+
+def test_observation_only_recovery_rejects_unclaimed_intent(tmp_path: Path) -> None:
+    store = SqliteEffectStore(tmp_path / "unclaimed.sqlite")
+    gateway = EffectGateway(store, {"wire_money": IrreversibleExternalSystem()})
+    intent = EffectIntent(
+        run_id="run", effect_id="unclaimed", tool="wire_money",
+        effect_class=EffectClass.IRREVERSIBLE,
+    )
+    store.put_intent(intent.run_id, intent.effect_id, intent.tool,
+                     intent.effect_class, intent.model_dump(mode="json"))
+    with pytest.raises(ValueError, match="EFFECT_NOT_DISPATCHED"):
+        gateway.recover(intent)
