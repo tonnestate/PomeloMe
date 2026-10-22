@@ -54,6 +54,7 @@ class EffectGateway:
         adapters: dict[str, EffectAdapter],
         policy: DefaultPolicyKernel | None = None,
         resolution_authorizer: Callable[[str, str, str, str], bool] | None = None,
+        pre_dispatch: Callable[[EffectIntent], None] | None = None,
     ) -> None:
         self.store = store
         self.adapters = adapters
@@ -61,6 +62,7 @@ class EffectGateway:
         # Trusted host must install an independently enforced owner approval
         # boundary. Supplying just a resolver name does NOT authorize release.
         self.resolution_authorizer = resolution_authorizer
+        self.pre_dispatch = pre_dispatch
 
     def execute(
         self,
@@ -98,6 +100,8 @@ class EffectGateway:
         self.policy.require_effect(
             authority, intent.tool, intent.effect_class, intent.required_capabilities
         )
+        if self.pre_dispatch is not None:
+            self.pre_dispatch(intent)
         # A single durable transaction owns the transition to DISPATCHED.
         # Otherwise two concurrent callers can both read INTENDED, both
         # authorize and dispatch the same irreversible effect.
