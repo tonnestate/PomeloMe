@@ -181,6 +181,11 @@ class EffectGateway:
     def _commit_observation(
         self, intent: EffectIntent, observation: EffectObservation, *, dispatched: bool
     ) -> EffectResult:
+        if observation.success is None:
+            self.store.commit_unknown_observation(
+                intent.effect_id, observation.model_dump(mode="json")
+            )
+            return EffectResult(EffectState.UNKNOWN, observation, dispatched=dispatched)
         state = EffectState.KNOWN_SUCCESS if observation.success else EffectState.KNOWN_FAILURE
         receipt_id = f"effect:{intent.effect_id}:observation"
         receipt = {

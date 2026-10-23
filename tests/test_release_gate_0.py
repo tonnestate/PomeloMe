@@ -59,6 +59,41 @@ def test_release_gate_0_no_duplicate_irreversible_effect_after_crash(tmp_path: P
     assert SqliteEffectStore(store_path).count_receipts() == 1
 
 
+def test_unknown_dispatch_observation_is_recovered_without_false_failure(tmp_path: Path) -> None:
+    class AmbiguousExternal(IrreversibleExternalSystem):
+        def dispatch(self, intent):
+            self.dispatches += 1
+            self.done.add(intent.effect_id)
+            return EffectObservation(success=None, message="acknowledgement lost")
+
+    store_path = tmp_path / "unknown.sqlite"
+    external = AmbiguousExternal()
+    auth = AuthorityEnvelope(
+        authority_id="auth", principal="tester",
+        capabilities=frozenset({"tool:wire_money", "effect:irreversible"}),
+    )
+    intent = EffectIntent(
+        run_id="run", effect_id="ambiguous", tool="wire_money",
+        effect_class=EffectClass.IRREVERSIBLE,
+    )
+
+    first = EffectGateway(SqliteEffectStore(store_path), {"wire_money": external})
+    result = first.execute(intent, auth)
+    assert result.state is EffectState.UNKNOWN
+    assert result.observation.success is None
+    assert external.dispatches == 1
+    assert SqliteEffectStore(store_path).get_effect("ambiguous")["state"] == EffectState.UNKNOWN
+    assert SqliteEffectStore(store_path).count_receipts() == 0
+
+    restarted = EffectGateway(SqliteEffectStore(store_path), {"wire_money": external})
+    recovered = restarted.recover(intent)
+    assert recovered.state is EffectState.RECONCILED
+    assert recovered.observation.success is True
+    assert not recovered.dispatched
+    assert external.dispatches == 1
+    assert SqliteEffectStore(store_path).count_receipts() == 1
+
+
 def test_effect_identity_collision_fails_closed(tmp_path: Path) -> None:
     store = SqliteEffectStore(tmp_path / "collision.sqlite")
     first = EffectIntent(

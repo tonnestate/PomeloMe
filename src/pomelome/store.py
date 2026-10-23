@@ -189,6 +189,15 @@ class SqliteEffectStore:
                 (receipt_id, json.dumps(receipt, sort_keys=True)),
             )
 
+    def commit_unknown_observation(
+        self, effect_id: str, observation: dict[str, Any]
+    ) -> None:
+        with self.transaction() as con:
+            con.execute(
+                "UPDATE effects SET state = ?, observation_json = ? WHERE effect_id = ?",
+                (EffectState.UNKNOWN, json.dumps(observation, sort_keys=True), effect_id),
+            )
+
     def resolve_waiting(self, effect_id: str, *, outcome: str,
                         resolver: str, evidence_ref: str) -> dict[str, Any]:
         """Atomically close an uncertain effect with host-attested evidence.
