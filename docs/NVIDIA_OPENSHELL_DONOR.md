@@ -9,7 +9,7 @@ PomeloMe already had `src/pomelome/adapters/openshell_backend.py` and an optiona
 - `SandboxClient.from_active_cluster()` is preferred; upstream handles that authenticated gateway profile. No second OpenShell daemon is started by PomeloMe.
 - An explicit `endpoint` uses the upstream SDK's plaintext connection; only a loopback host and a specified valid port are permitted. Remote clusters must use the SDK active-cluster authentication profile, not an unverified plaintext endpoint.
 - Names derive deterministically from a SHA256 digest of the run ID instead of passing arbitrary worker text to OpenShell.
-- Invalid command lists are rejected before calling the SDK. Failed readiness triggers best-effort deletion; cleanup failure does not mask the primary failure.
+- Invalid command lists are rejected before calling the SDK. Execute/delete requests are restricted to sandboxes created by this adapter instance, and the live sandbox ID is checked against the ID returned at creation to reject a reused name. This is still not a replacement for upstream gateway authorization. Failed readiness triggers best-effort deletion; cleanup failure does not mask the primary failure.
 - No claim that a sandbox's default spec denies all egress. Host operators must configure, inspect and independently test the upstream OpenShell filesystem/network/process policy; this adapter does not grant semantic effects.
 
 ## Explicit live SDK probe (no unattended execution)
