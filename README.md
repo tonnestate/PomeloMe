@@ -17,6 +17,18 @@ deterministic runtime work.
 
 MangoMe and BlueberryMe are integrations, not dependencies. The PomeloMe core imports neither.
 
+## Proposed zero-cost media gate (feature branch only)
+
+This branch contains an **opt-in, host-injected** ZeroCostGuard at plan admission,
+READ and EFFECT dispatch; generic REQUEST_JUDGMENT model calls are prohibited.
+Only explicitly audited LOCAL tool names may run. Unknown/free-tier/cloud
+routes, billed credentials and automatic paid fallbacks are denied.
+
+**Not accepted or deployed production truth.** The calling host must inject the
+same guard into the runtime and EffectGateway and require
+BudgetEnvelope(max_cost_usd=0). A zero budget without a guard is not safe.
+See docs/ZERO_COST_MEDIA.md for the threat model, tests and host requirements.
+
 ## v0.1 proof target
 
 The first release proves one thing before it attempts orchestration breadth:

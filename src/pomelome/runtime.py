@@ -26,6 +26,7 @@ from .ir import (
 )
 from .models import AuthorityEnvelope
 from .ports import ModelRuntime, ReferenceResolver, ToolRuntime
+from .zero_cost import ZeroCostGuard
 
 
 @dataclass
@@ -46,12 +47,18 @@ class PomeloRuntime:
         model: ModelRuntime | None = None,
         refs: ReferenceResolver | None = None,
         admitter: PlanAdmitter | None = None,
+        zero_cost: ZeroCostGuard | None = None,
     ) -> None:
+        if effects.zero_cost is not zero_cost:
+            raise ValueError("zero-cost guard mismatch between runtime and gateway")
+        if admitter is not None and admitter.zero_cost is not zero_cost:
+            raise ValueError("zero-cost guard mismatch between runtime and admission")
         self.tools = tools
         self.effects = effects
         self.model = model
         self.refs = refs
-        self.admitter = admitter or PlanAdmitter()
+        self.zero_cost = zero_cost
+        self.admitter = admitter or PlanAdmitter(zero_cost=zero_cost)
 
     def run(
         self,
@@ -93,8 +100,10 @@ class PomeloRuntime:
     ) -> None:
         for node in nodes:
             if isinstance(node, ReadNode):
-                budget.consume_read()
                 args = self._resolve_args(node.args, ctx)
+                if self.zero_cost is not None:
+                    self.zero_cost.require_operation("READ", node.tool, args)
+                budget.consume_read()
                 ctx[node.output] = self.tools.read(node.tool, args)
             elif isinstance(node, EffectNode):
                 budget.consume_effect()
@@ -161,6 +170,8 @@ class PomeloRuntime:
                         elif ctx[key] != value:
                             raise RuntimeError(f"parallel branch wrote conflicting ref: {key}")
             elif isinstance(node, RequestJudgmentNode):
+                if self.zero_cost is not None:
+                    self.zero_cost.require_no_model()
                 if self.model is None:
                     raise ReplanRequired(f"{node.id}: model runtime required")
                 budget.consume_model_call()
