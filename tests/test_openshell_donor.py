@@ -14,6 +14,7 @@ class FakeClient:
         self.endpoint = endpoint
         self.calls = []
         self.fail_ready = False
+        self.current_id = "sandbox-123"
 
     @classmethod
     def from_active_cluster(cls):
@@ -28,12 +29,16 @@ class FakeClient:
 
     def create(self, *, workspace, name):
         self.calls.append(("create", workspace, name))
-        return SimpleNamespace(name=name)
+        return SimpleNamespace(name=name, id="sandbox-123")
 
     def wait_ready(self, name, *, workspace, timeout_seconds):
         self.calls.append(("wait_ready", name, workspace, timeout_seconds))
         if self.fail_ready:
             raise TimeoutError("not ready")
+
+    def get(self, sandbox_ref, *, workspace):
+        self.calls.append(("get", sandbox_ref, workspace))
+        return SimpleNamespace(id=self.current_id)
 
     def exec(self, sandbox_ref, command, *, workspace):
         self.calls.append(("exec", sandbox_ref, command, workspace))
@@ -129,3 +134,17 @@ def test_deletion_timeout_does_not_forget_sandbox(monkeypatch):
     with pytest.raises(TimeoutError):
         backend.terminate(name)
     assert name in backend._owned_sandboxes
+
+
+
+def test_reused_sandbox_name_cannot_be_executed_or_deleted(monkeypatch):
+    monkeypatch.setitem(sys.modules, "openshell", SimpleNamespace(SandboxClient=FakeClient))
+    backend = OpenShellBackend(workspace="trusted")
+    name = backend.create("run")
+    backend._client.current_id = "another-owner-sandbox-id"
+    with pytest.raises(PermissionError):
+        backend.exec(name, ["true"])
+    with pytest.raises(PermissionError):
+        backend.terminate(name)
+    assert name in backend._owned_sandboxes
+    assert not any(c[0] in {"exec", "delete"} for c in backend._client.calls if isinstance(c, tuple))
