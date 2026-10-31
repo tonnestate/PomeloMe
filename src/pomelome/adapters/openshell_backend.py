@@ -44,6 +44,8 @@ class OpenShellBackend:
         except ImportError as exc:  # pragma: no cover - optional dependency
             raise RuntimeError("install pomelome[sandbox] to use OpenShellBackend") from exc
         self.workspace = workspace
+        # The adapter must not operate on arbitrary peer sandboxes sharing a workspace.
+        self._owned_sandboxes: set[str] = set()
         self._client = (
             SandboxClient(endpoint) if endpoint else SandboxClient.from_active_cluster()
         )
@@ -58,6 +60,7 @@ class OpenShellBackend:
         sandbox = self._client.create(workspace=self.workspace, name=stable_name)
         if not sandbox.name:
             raise RuntimeError("OpenShell returned an empty sandbox name")
+        self._owned_sandboxes.add(sandbox.name)
         try:
             self._client.wait_ready(sandbox.name, workspace=self.workspace, timeout_seconds=120)
         except Exception:
@@ -72,18 +75,23 @@ class OpenShellBackend:
     def exec(self, sandbox_ref: str, command: list[str]) -> tuple[int, str, str]:
         if not sandbox_ref or not command or not all(isinstance(x, str) and x for x in command):
             raise ValueError("sandbox_ref and nonempty argv are required")
+        if sandbox_ref not in self._owned_sandboxes:
+            raise PermissionError("sandbox was not created by this adapter instance")
         result = self._client.exec(sandbox_ref, command, workspace=self.workspace)
         return int(result.exit_code), result.stdout, result.stderr
 
     def terminate(self, sandbox_ref: str) -> None:
         if not sandbox_ref:
             raise ValueError("sandbox_ref is required")
+        if sandbox_ref not in self._owned_sandboxes:
+            raise PermissionError("sandbox was not created by this adapter instance")
         deletion = self._client.delete(sandbox_ref, workspace=self.workspace, allow_missing=True)
         self._client.wait_deleted(
             sandbox_ref,
             workspace=self.workspace,
             expected_sandbox_id=deletion.sandbox_id,
         )
+        self._owned_sandboxes.remove(sandbox_ref)
 
     def close(self) -> None:
         self._client.__exit__(None, None, None)
