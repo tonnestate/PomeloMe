@@ -96,3 +96,36 @@ def test_invalid_exec_command_does_not_cross_boundary(monkeypatch):
     with pytest.raises(ValueError):
         backend.exec("", ["true"])
     assert not any(c[0] == "exec" for c in backend._client.calls if isinstance(c, tuple))
+
+
+def test_unowned_sandbox_never_executes_or_deletes(monkeypatch):
+    monkeypatch.setitem(sys.modules, "openshell", SimpleNamespace(SandboxClient=FakeClient))
+    backend = OpenShellBackend(workspace="trusted")
+    name = backend.create("owned")
+    for operation in (
+        lambda: backend.exec("another-peers-sandbox", ["true"]),
+        lambda: backend.terminate("another-peers-sandbox"),
+    ):
+        with pytest.raises(PermissionError):
+            operation()
+    assert all(
+        not (event[0] in {"exec", "delete"} and event[1] == "another-peers-sandbox")
+        for event in backend._client.calls if isinstance(event, tuple)
+    )
+    assert name in backend._owned_sandboxes
+    backend.terminate(name)
+    assert name not in backend._owned_sandboxes
+
+
+def test_deletion_timeout_does_not_forget_sandbox(monkeypatch):
+    class DeleteFails(FakeClient):
+        def wait_deleted(self, sandbox_ref, *, workspace, expected_sandbox_id):
+            self.calls.append(("wait_deleted", sandbox_ref, workspace, expected_sandbox_id))
+            raise TimeoutError("sandbox may still exist")
+
+    monkeypatch.setitem(sys.modules, "openshell", SimpleNamespace(SandboxClient=DeleteFails))
+    backend = OpenShellBackend()
+    name = backend.create("run")
+    with pytest.raises(TimeoutError):
+        backend.terminate(name)
+    assert name in backend._owned_sandboxes
