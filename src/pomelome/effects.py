@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import Any, Callable, Protocol
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_serializer
 
 from .errors import SimulatedCrash
 from .fsm import EffectState
@@ -20,6 +20,11 @@ class EffectIntent(BaseModel):
     args: dict[str, Any] = Field(default_factory=dict)
     required_capabilities: frozenset[str] = Field(default_factory=frozenset)
     idempotency_key: str | None = None
+
+    @field_serializer("required_capabilities")
+    def _canonical_capabilities(self, value: frozenset[str]) -> list[str]:
+        """Durable identity must not depend on PYTHONHASHSEED."""
+        return sorted(value)
 
 
 class EffectObservation(BaseModel):
@@ -48,10 +53,16 @@ class EffectGateway:
         store: SqliteEffectStore,
         adapters: dict[str, EffectAdapter],
         policy: DefaultPolicyKernel | None = None,
+        resolution_authorizer: Callable[[str, str, str, str], bool] | None = None,
+        pre_dispatch: Callable[[EffectIntent], None] | None = None,
     ) -> None:
         self.store = store
         self.adapters = adapters
         self.policy = policy or DefaultPolicyKernel()
+        # Trusted host must install an independently enforced owner approval
+        # boundary. Supplying just a resolver name does NOT authorize release.
+        self.resolution_authorizer = resolution_authorizer
+        self.pre_dispatch = pre_dispatch
 
     def execute(
         self,
@@ -89,13 +100,74 @@ class EffectGateway:
         self.policy.require_effect(
             authority, intent.tool, intent.effect_class, intent.required_capabilities
         )
-        self.store.set_state(intent.effect_id, EffectState.AUTHORIZED)
-        # Persist DISPATCHED before crossing the external boundary.
-        self.store.set_state(intent.effect_id, EffectState.DISPATCHED, increment_dispatch=True)
+        if self.pre_dispatch is not None:
+            self.pre_dispatch(intent)
+        # A single durable transaction owns the transition to DISPATCHED.
+        # Otherwise two concurrent callers can both read INTENDED, both
+        # authorize and dispatch the same irreversible effect.
+        if not self.store.claim_dispatch(intent.effect_id):
+            current = self.store.get_effect(intent.effect_id)
+            assert current is not None
+            # A competing caller may still be dispatching. Never probe or
+            # redispatch from this failed claim; explicit later recovery uses
+            # the existing DISPATCHED -> PROBING path.
+            return EffectResult(EffectState(current["state"]), None, dispatched=False)
         observation = adapter.dispatch(intent)
         if crash_after_dispatch:
             raise SimulatedCrash("fault injection: process lost after dispatch before durable observation")
         return self._commit_observation(intent, observation, dispatched=True)
+
+    def recover(self, intent: EffectIntent) -> EffectResult:
+        """Explicit observation/reconciliation of a previously claimed effect.
+
+        It never calls dispatch and never needs current dispatch authority.
+        The persisted intent identity must match exactly, including arguments.
+        """
+        entry = self.store.get_effect(intent.effect_id)
+        if entry is None or self.store.canonical_intent(entry["intent"]) != self.store.canonical_intent(intent.model_dump(mode="json")):
+            raise ValueError("EFFECT_NOT_FOUND_OR_IDENTITY_MISMATCH")
+        state = EffectState(entry["state"])
+        if state in (EffectState.INTENDED, EffectState.AUTHORIZED):
+            raise ValueError("EFFECT_NOT_DISPATCHED")
+        if state is EffectState.RECONCILED:
+            obs = (EffectObservation.model_validate(entry["observation"])
+                   if entry["observation"] is not None else None)
+            return EffectResult(state, obs, dispatched=False)
+        if state in (EffectState.KNOWN_SUCCESS, EffectState.KNOWN_FAILURE):
+            obs = EffectObservation.model_validate(entry["observation"])
+            self.store.reconcile(intent.effect_id)
+            return EffectResult(EffectState.RECONCILED, obs, dispatched=False)
+        if state is EffectState.WAITING_APPROVAL:
+            return EffectResult(state, None, dispatched=False)
+        return self._recover(intent)
+
+    def resolve_waiting(self, effect_id: str, outcome: str, *,
+                        resolver: str, evidence_ref: str) -> EffectResult:
+        """Host-authorized settlement; never invokes effect adapters.
+
+        The owner may attest success, failure, or UNKNOWN_CLOSED. The final
+        option permits organizational continuation without pretending an
+        uncertain effect failed or succeeded.
+        """
+        if outcome not in ("CONFIRMED_SUCCESS", "CONFIRMED_FAILURE", "UNKNOWN_CLOSED"):
+            raise ValueError("INVALID_RESOLUTION_OUTCOME")
+        if not isinstance(resolver, str) or not resolver.strip():
+            raise ValueError("RESOLVER_REQUIRED")
+        if not isinstance(evidence_ref, str) or not evidence_ref.strip():
+            raise ValueError("RESOLUTION_EVIDENCE_REQUIRED")
+        if self.resolution_authorizer is None or self.resolution_authorizer(
+            effect_id, outcome, resolver.strip(), evidence_ref.strip()
+        ) is not True:
+            from .errors import AuthorizationError
+            raise AuthorizationError("HOST_EFFECT_RESOLUTION_AUTHORITY_REQUIRED")
+        observation = self.store.resolve_waiting(
+            effect_id, outcome=outcome, resolver=resolver, evidence_ref=evidence_ref
+        )
+        return EffectResult(
+            EffectState.RECONCILED,
+            EffectObservation.model_validate(observation),
+            dispatched=False,
+        )
 
     def _recover(self, intent: EffectIntent) -> EffectResult:
         adapter = self.adapters[intent.tool]
@@ -109,6 +181,11 @@ class EffectGateway:
     def _commit_observation(
         self, intent: EffectIntent, observation: EffectObservation, *, dispatched: bool
     ) -> EffectResult:
+        if observation.success is None:
+            self.store.commit_unknown_observation(
+                intent.effect_id, observation.model_dump(mode="json")
+            )
+            return EffectResult(EffectState.UNKNOWN, observation, dispatched=dispatched)
         state = EffectState.KNOWN_SUCCESS if observation.success else EffectState.KNOWN_FAILURE
         receipt_id = f"effect:{intent.effect_id}:observation"
         receipt = {
