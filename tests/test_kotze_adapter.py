@@ -21,7 +21,8 @@ def harness(tmp_path, runner):
                      " evidence_ref TEXT, resulting_revision INTEGER)")
         conn.execute("INSERT INTO works VALUES('k-work', 'REPAIRING', 'UNKNOWN', '')")
     config = tmp_path / "host-config.json"
-    config.write_text("{}")
+    config.write_text('{"schema":"kotze.repair-pipeline.v1",'
+                      '"work_id":"k-work","db":' + __import__("json").dumps(str(db)) + '}')
     pipeline = tmp_path / "repair_pipeline.py"
     pipeline.write_text("not executed by test")
     binding = KotzeBinding(session_id="session-1", work_ref="fruit:work-1",
@@ -140,6 +141,25 @@ def test_work_scope_and_arguments_are_not_model_controlled(tmp_path):
     with pytest.raises(ValueError, match="CONTRACT_INVALID"):
         adapter.dispatch(intent.model_copy(update={"args": {"work_ref": "fruit:work-1",
                                                              "command": "rm -rf /"}}))
+    assert calls == []
+
+
+def test_mismatched_host_registration_does_not_launch(tmp_path):
+    calls = []
+
+    def runner(argv, **kwargs):
+        calls.append(argv)
+        return subprocess.CompletedProcess(argv, 0)
+
+    db, adapter, intent, auth, store = harness(tmp_path, runner)
+    adapter.registrations["fruit:work-1"].config_path.write_text(
+        '{"schema":"kotze.repair-pipeline.v1","work_id":"different","db":' +
+        __import__("json").dumps(str(db)) + '}'
+    )
+    result = EffectGateway(store, {KOTZE_TOOL: adapter}).execute(intent, auth)
+    assert result.state is EffectState.UNKNOWN
+    assert result.observation.success is None
+    assert result.observation.message == "KOTZE_HOST_BINDING_MISMATCH"
     assert calls == []
 
 
