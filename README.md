@@ -4,6 +4,8 @@
 
 # PomeloMe v0.1.0
 
+**KOTZE coding-repair integration:** The optional host-only [`KotzeRepairAdapter`](docs/KOTZE_EFFECT_ADAPTER.md) binds a host-pinned KOTZE C11 work to PomeloMe's existing durable effect protocol. It does not execute unregistered commands or grant verification authority. Cross-host deployment remains unverified.
+
 **Decision-sparse execution runtime for governed, durable agentic work.**
 
 PomeloMe is deliberately not another multi-agent framework. Its core hypothesis is that most
