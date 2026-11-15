@@ -7,7 +7,7 @@ Never accept file paths, commands, credentials or verifier claims from an agent.
 from __future__ import annotations
 
 from dataclasses import dataclass
-import os
+import json
 from pathlib import Path
 import re
 import sqlite3
@@ -126,6 +126,17 @@ class KotzeRepairAdapter:
     def dispatch(self, intent: EffectIntent) -> EffectObservation:
         """Run the pinned pipeline after PomeloMe has claimed dispatch durably."""
         binding = self._binding(intent)
+        # Prevent a trusted registry/config mismatch from executing another
+        # C11 work under this effect identity. KOTZE also validates full config.
+        try:
+            config = json.loads(binding.config_path.read_text(encoding="utf-8"))
+            if (not isinstance(config, dict)
+                    or config.get("schema") != "kotze.repair-pipeline.v1"
+                    or config.get("work_id") != binding.work_id
+                    or config.get("db") != str(binding.db_path)):
+                return EffectObservation(success=None, message="KOTZE_HOST_BINDING_MISMATCH")
+        except (OSError, ValueError, UnicodeError):
+            return EffectObservation(success=None, message="KOTZE_CONFIG_UNAVAILABLE")
         command = [
             str(self.python), "-I", "-B", str(self.pipeline),
             "--config", str(binding.config_path),
