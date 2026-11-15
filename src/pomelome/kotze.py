@@ -6,6 +6,7 @@ Never accept file paths, commands, credentials or verifier claims from an agent.
 """
 from __future__ import annotations
 
+from contextlib import closing
 from dataclasses import dataclass
 import json
 from pathlib import Path
@@ -95,7 +96,7 @@ class KotzeRepairAdapter:
             return None
         uri = "file:" + quote(str(db), safe="/") + "?mode=ro"
         try:
-            with sqlite3.connect(uri, uri=True, timeout=5) as conn:
+            with closing(sqlite3.connect(uri, uri=True, timeout=5)) as conn:
                 conn.execute("PRAGMA query_only=ON")
                 work = conn.execute(
                     "SELECT state, verification_state, candidate_sha FROM works WHERE id=?",
