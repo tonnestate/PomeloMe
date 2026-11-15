@@ -68,7 +68,7 @@ class KotzeRepairAdapter:
         if type(timeout_seconds) is not int or not 30 <= timeout_seconds <= 3600:
             raise ValueError("KOTZE_TIMEOUT_OUT_OF_RANGE")
         self.registrations = dict(registrations)
-        if not all(isinstance(ref, str) and ref == b.work_ref and isinstance(b, KotzeBinding)
+        if not all(isinstance(ref, str) and isinstance(b, KotzeBinding) and ref == b.work_ref
                    for ref, b in self.registrations.items()):
             raise ValueError("KOTZE_REGISTRATION_MISMATCH")
         self.pipeline = pipeline
@@ -79,7 +79,8 @@ class KotzeRepairAdapter:
     def _binding(self, intent: EffectIntent) -> KotzeBinding:
         if (intent.tool != KOTZE_TOOL or intent.effect_class != EffectClass.IRREVERSIBLE
                 or type(intent.args) is not dict or set(intent.args) != {"work_ref"}
-                or type(intent.args.get("work_ref")) is not str):
+                or type(intent.args.get("work_ref")) is not str
+                or "kotze.repair" not in intent.required_capabilities):
             raise ValueError("KOTZE_EFFECT_CONTRACT_INVALID")
         binding = self.registrations.get(intent.args["work_ref"])
         if binding is None or binding.session_id != intent.run_id:
